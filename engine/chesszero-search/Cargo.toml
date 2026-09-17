@@ -1,0 +1,10 @@
+[package]
+name = "chesszero-search"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Alpha-beta search for data generation; MCTS for live play"
+
+[dependencies]
+shakmaty.workspace = true
+chesszero-core.workspace = true

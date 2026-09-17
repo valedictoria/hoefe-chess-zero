@@ -1,5 +1,5 @@
 [workspace]
-members = ["chesszero-core", "chesszero-nn"]
+members = ["chesszero-core", "chesszero-nn", "chesszero-search"]
 resolver = "2"
 
 [workspace.package]
@@ -14,6 +14,7 @@ candle-core = "0.11"
 candle-nn = "0.11"
 safetensors = "0.8"
 chesszero-core = { path = "chesszero-core" }
+chesszero-nn = { path = "chesszero-nn" }
 
 [profile.release]
 lto = "thin"

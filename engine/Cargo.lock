@@ -177,6 +177,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "chesszero-search"
+version = "0.1.0"
+dependencies = [
+ "chesszero-core",
+ "shakmaty",
+]
+
+[[package]]
 name = "compact_str"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
