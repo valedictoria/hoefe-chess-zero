@@ -196,7 +196,12 @@ def encode_prefix(canon_board: chess.Board, repetitions: int = 0) -> list[int]:
             out.append(tid("sq:" + (char if piece.color == chess.WHITE else char.lower())))
 
     out.append(tid(CASTLE_TOKENS[_castle_code(canon_board)]))
-    ep = canon_board.ep_square
+    # Only record an en passant square that can actually be captured on.  A
+    # double push always sets `ep_square`, but if no capture is legal the square
+    # is not part of the position: encoding it would split two identical
+    # positions into different tokens, and it would not survive a round trip
+    # through `fen()`, which omits it for exactly the same reason.
+    ep = canon_board.ep_square if canon_board.has_legal_en_passant() else None
     out.append(tid(EP_TOKENS[0] if ep is None else EP_TOKENS[1 + chess.square_file(ep)]))
     out.append(tid(R50_TOKENS[_r50_bucket(canon_board.halfmove_clock)]))
     out.append(tid(REP_TOKENS[min(2, max(0, repetitions))]))
