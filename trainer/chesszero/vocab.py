@@ -53,16 +53,41 @@ MAT_TOKENS = [f"mat:{i}" for i in range(len(MAT_EDGES) + 1)]
 PHASE_TOKENS = ["ph:opening", "ph:middle", "ph:end"]
 KSAFE_TOKENS = ["ks:safe", "ks:ok", "ks:loose", "ks:exposed"]
 THR_TOKENS = [f"thr:{i}" for i in range(4)]
-TAC_TOKENS = [
-    "tac:none",
-    "tac:mate1",
-    "tac:check",
-    "tac:hang",
-    "tac:fork",
-    "tac:pin",
-    "tac:promo",
-    "tac:cap",
-    "tac:quiet",
+#: Named chess concepts the model may attach to a position.
+#:
+#: Every motif here MUST have a symbolic detector in
+#: :data:`chesszero.reasoning.MOTIF_DETECTORS`.  The detectors are the oracle
+#: the teaching layer's validation gate uses to throw away a motif the model
+#: asserted but the board does not support, so a motif without a detector is a
+#: claim nothing can check -- exactly the hole this design exists to close.
+MOTIF_TOKENS = [
+    # structural
+    "mo:none",       # padding, only after a real motif
+    "mo:quiet",      # nothing worth naming
+    # forcing / tactical
+    "mo:mate1",
+    "mo:check",
+    "mo:capture",
+    "mo:hanging",
+    "mo:fork",
+    "mo:pin",
+    "mo:skewer",
+    "mo:discovery",
+    "mo:backrank",
+    "mo:promotion",
+    "mo:overload",
+    "mo:trapped",
+    # positional
+    "mo:passer",
+    "mo:outpost",
+    "mo:rook7th",
+    "mo:openfile",
+    "mo:battery",
+    "mo:kingattack",
+    "mo:badbishop",
+    "mo:doubled",
+    "mo:isolated",
+    "mo:space",
 ]
 PLAN_TOKENS = [
     "plan:develop",
@@ -93,7 +118,7 @@ VOCAB: list[str] = (
     + PHASE_TOKENS
     + KSAFE_TOKENS
     + THR_TOKENS
-    + TAC_TOKENS
+    + MOTIF_TOKENS
     + PLAN_TOKENS
     + EVAL_TOKENS
 )
@@ -125,12 +150,15 @@ def tokens(id_seq) -> list[str]:
 
 _MOVE_SLOTS = [SQUARE_TOKENS, SQUARE_TOKENS, PROMO_TOKENS]
 
+#: how many motifs a trace may name
+N_MOTIF_SLOTS = 3
+
 TRACE_SLOTS: list[list[str]] = (
     [["f:MAT"], MAT_TOKENS]
     + [["f:PHASE"], PHASE_TOKENS]
     + [["f:KSAFE"], KSAFE_TOKENS, KSAFE_TOKENS]
     + [["f:THR"], THR_TOKENS]
-    + [["f:TAC"], TAC_TOKENS, TAC_TOKENS]
+    + [["f:TAC"]] + [MOTIF_TOKENS] * N_MOTIF_SLOTS
     + [["f:PLAN"], PLAN_TOKENS]
     + [["f:CAND"]] + _MOVE_SLOTS * 3
     + [["f:BEST"]] + _MOVE_SLOTS
@@ -139,7 +167,7 @@ TRACE_SLOTS: list[list[str]] = (
 )
 
 TRACE_LEN = len(TRACE_SLOTS)
-assert TRACE_LEN == 31, TRACE_LEN
+assert TRACE_LEN == 32, TRACE_LEN
 
 #: slot index of each interesting field inside a trace
 SLOT_MAT = 1
@@ -147,11 +175,11 @@ SLOT_PHASE = 3
 SLOT_KSAFE_US = 5
 SLOT_KSAFE_THEM = 6
 SLOT_THR = 8
-SLOT_TAC = (10, 11)
-SLOT_PLAN = 13
-SLOT_CAND = (15, 18, 21)  # each is the from-square slot of a candidate move
-SLOT_BEST = 25
-SLOT_EVAL = 29
+SLOT_MOTIF = (10, 11, 12)
+SLOT_PLAN = 14
+SLOT_CAND = (16, 19, 22)  # each is the from-square slot of a candidate move
+SLOT_BEST = 26
+SLOT_EVAL = 30
 
 TRACE_SLOT_IDS: list[list[int]] = [ids(slot) for slot in TRACE_SLOTS]
 

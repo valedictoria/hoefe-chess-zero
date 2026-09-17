@@ -1,0 +1,12 @@
+[project]
+name = "chesszero-trainer"
+version = "0.1.0"
+description = "Training half of the chesszero engine: PyTorch model, teacher traces, weight export"
+requires-python = ">=3.10"
+dependencies = ["torch>=2.0", "chess>=1.10", "numpy>=1.24", "safetensors>=0.4"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
