@@ -6,6 +6,8 @@
 
 pub mod alphabeta;
 pub mod eval;
+pub mod score;
 
 pub use alphabeta::{score_string, Limits, SearchResult, Searcher, MATE, MATE_THRESHOLD};
-pub use eval::evaluate;
+pub use eval::{evaluate, evaluate_detailed, Breakdown};
+pub use score::Score;

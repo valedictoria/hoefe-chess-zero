@@ -255,3 +255,175 @@ pub fn eval_bucket(q: f64) -> usize {
     let q = q.clamp(-1.0, 1.0);
     round_half_even((q + 1.0) * 0.5 * 10.0) as usize
 }
+
+// --------------------------------------------------------------------------
+// Shared structural features
+//
+// The motif detectors and the engine's evaluation want the same facts: is this
+// pawn passed, is that file open, how much can this piece move. Writing them
+// twice guarantees the two drift, and the drift is silent -- the detector says
+// "passed pawn" while the evaluation scores it as backward, and nothing fails.
+//
+// So they live here once, colour-generic, and both callers consume them. The
+// motif detectors call them with White because they run on canonical positions;
+// the evaluation calls them with both colours.
+// --------------------------------------------------------------------------
+
+/// Rank as the given colour sees it: 0 is that colour's back rank, 7 promotion.
+///
+/// Writing every feature in terms of this instead of absolute ranks is what
+/// makes one implementation serve both sides without a mirrored copy.
+#[inline]
+pub fn relative_rank(color: Color, sq: Square) -> i32 {
+    let rank = u32::from(sq.rank()) as i32;
+    if color == Color::White {
+        rank
+    } else {
+        7 - rank
+    }
+}
+
+#[inline]
+fn file_of(sq: Square) -> i32 {
+    u32::from(sq.file()) as i32
+}
+
+/// Is `other` further up the board than `sq`, from `color`'s point of view?
+#[inline]
+fn ahead_of(color: Color, other: Square, sq: Square) -> bool {
+    relative_rank(color, other) > relative_rank(color, sq)
+}
+
+/// Pawns of `color` with no enemy pawn ahead on their own or an adjacent file.
+pub fn passed_pawns(board: &Board, color: Color) -> Bitboard {
+    let theirs = pieces(board, Role::Pawn, !color);
+    pieces(board, Role::Pawn, color)
+        .into_iter()
+        .filter(|sq| {
+            !theirs.into_iter().any(|enemy| {
+                (file_of(enemy) - file_of(*sq)).abs() <= 1 && ahead_of(color, enemy, *sq)
+            })
+        })
+        .collect()
+}
+
+/// Pawns of `color` sharing a file with another friendly pawn.
+pub fn doubled_pawns(board: &Board, color: Color) -> Bitboard {
+    let pawns = pieces(board, Role::Pawn, color);
+    pawns
+        .into_iter()
+        .filter(|sq| pawns.into_iter().filter(|p| p.file() == sq.file()).count() >= 2)
+        .collect()
+}
+
+/// Pawns of `color` with no friendly pawn on either adjacent file.
+pub fn isolated_pawns(board: &Board, color: Color) -> Bitboard {
+    let pawns = pieces(board, Role::Pawn, color);
+    let files: Vec<i32> = pawns.into_iter().map(file_of).collect();
+    pawns
+        .into_iter()
+        .filter(|sq| {
+            let f = file_of(*sq);
+            !files.contains(&(f - 1)) && !files.contains(&(f + 1))
+        })
+        .collect()
+}
+
+/// No pawn of either colour stands on this file.
+pub fn is_open_file(board: &Board, file: File) -> bool {
+    !board
+        .by_role(Role::Pawn)
+        .into_iter()
+        .any(|p| p.file() == file)
+}
+
+/// No pawn of `color` stands on this file, though the enemy may have one.
+pub fn is_semi_open_file(board: &Board, color: Color, file: File) -> bool {
+    !pieces(board, Role::Pawn, color)
+        .into_iter()
+        .any(|p| p.file() == file)
+}
+
+/// Knights of `color` standing on an outpost: advanced, defended by a friendly
+/// pawn, and beyond the reach of any enemy pawn.
+pub fn outposts(board: &Board, color: Color) -> Bitboard {
+    let theirs = pieces(board, Role::Pawn, !color);
+    pieces(board, Role::Knight, color)
+        .into_iter()
+        .filter(|sq| {
+            if !(3..=5).contains(&relative_rank(color, *sq)) {
+                return false;
+            }
+            let pawn_defended = attackers(board, color, *sq)
+                .into_iter()
+                .any(|a| board.role_at(a) == Some(Role::Pawn));
+            if !pawn_defended {
+                return false;
+            }
+            !theirs
+                .into_iter()
+                .any(|enemy| (file_of(enemy) - file_of(*sq)).abs() == 1 && ahead_of(color, enemy, *sq))
+        })
+        .collect()
+}
+
+/// Squares a piece can reach that are neither occupied by its own side nor
+/// covered by an enemy pawn. Squares an enemy pawn attacks do not count: a
+/// knight cannot usefully stand where a pawn may simply take it.
+pub fn mobility(board: &Board, color: Color, sq: Square) -> u32 {
+    let own = board.by_color(color);
+    let pawn_covered = pawn_attack_span(board, !color);
+    attacks_from(board, sq)
+        .without_const(own)
+        .without_const(pawn_covered)
+        .count() as u32
+}
+
+/// Every square attacked by a pawn of `color`.
+pub fn pawn_attack_span(board: &Board, color: Color) -> Bitboard {
+    pieces(board, Role::Pawn, color)
+        .into_iter()
+        .map(|sq| shakmaty::attacks::pawn_attacks(color, sq))
+        .fold(Bitboard::EMPTY, |acc, b| acc | b)
+}
+
+/// The king of `color` and the squares around it.
+pub fn king_zone(board: &Board, color: Color) -> Bitboard {
+    match board.king_of(color) {
+        Some(king) => shakmaty::attacks::king_attacks(king) | Bitboard::from_square(king),
+        None => Bitboard::EMPTY,
+    }
+}
+
+/// How many pieces of `attacker` bear on the enemy king zone, and how heavily.
+///
+/// Returns (attacker count, weighted pressure). The weights are the usual
+/// ordering -- a queen near the king matters far more than a knight -- and the
+/// count matters because a single attacker is rarely dangerous on its own.
+pub fn king_attack_pressure(board: &Board, attacker: Color) -> (u32, u32) {
+    let zone = king_zone(board, !attacker);
+    if zone.is_empty() {
+        return (0, 0);
+    }
+    let mut count = 0;
+    let mut weight = 0;
+    for sq in board.by_color(attacker) {
+        let Some(role) = board.role_at(sq) else { continue };
+        if role == Role::Pawn || role == Role::King {
+            continue;
+        }
+        let hits = (attacks_from(board, sq) & zone).count() as u32;
+        if hits > 0 {
+            count += 1;
+            weight += hits
+                * match role {
+                    Role::Knight => 2,
+                    Role::Bishop => 2,
+                    Role::Rook => 3,
+                    Role::Queen => 5,
+                    _ => 0,
+                };
+        }
+    }
+    (count, weight)
+}

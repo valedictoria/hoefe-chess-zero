@@ -14,7 +14,8 @@ use shakmaty::{Bitboard, Chess, Color, File, Move, Position, Rank, Role, Square}
 
 use crate::encoding::move_squares;
 use crate::features::{
-    attackers, attacks_from, hanging_pieces, is_attacked_by, is_pinned, pieces, tactical_value,
+    attackers, attacks_from, doubled_pawns, hanging_pieces, is_attacked_by, is_open_file,
+    is_pinned, isolated_pawns, outposts, passed_pawns, pieces, tactical_value,
 };
 use crate::vocab::N_MOTIF_SLOTS;
 
@@ -284,33 +285,11 @@ pub fn has_trapped(pos: &Chess) -> bool {
 }
 
 pub fn has_passer(pos: &Chess) -> bool {
-    let board = pos.board();
-    let black_pawns = pieces(board, Role::Pawn, Color::Black);
-    pieces(board, Role::Pawn, Color::White).into_iter().any(|sq| {
-        !black_pawns.into_iter().any(|bp| {
-            (file_i(bp) - file_i(sq)).abs() <= 1 && rank_i(bp) > rank_i(sq)
-        })
-    })
+    !passed_pawns(pos.board(), Color::White).is_empty()
 }
 
 pub fn has_outpost(pos: &Chess) -> bool {
-    let board = pos.board();
-    let black_pawns = pieces(board, Role::Pawn, Color::Black);
-    pieces(board, Role::Knight, Color::White).into_iter().any(|sq| {
-        let r = rank_i(sq);
-        if !(3..=5).contains(&r) {
-            return false;
-        }
-        let pawn_defended = attackers(board, Color::White, sq)
-            .into_iter()
-            .any(|a| board.role_at(a) == Some(Role::Pawn));
-        if !pawn_defended {
-            return false;
-        }
-        !black_pawns
-            .into_iter()
-            .any(|bp| (file_i(bp) - file_i(sq)).abs() == 1 && rank_i(bp) > r)
-    })
+    !outposts(pos.board(), Color::White).is_empty()
 }
 
 pub fn has_rook7th(pos: &Chess) -> bool {
@@ -319,10 +298,9 @@ pub fn has_rook7th(pos: &Chess) -> bool {
 
 pub fn has_openfile(pos: &Chess) -> bool {
     let board = pos.board();
-    let pawns = board.by_role(Role::Pawn);
     pieces(board, Role::Rook, Color::White)
         .into_iter()
-        .any(|rook| !pawns.into_iter().any(|p| p.file() == rook.file()))
+        .any(|rook| is_open_file(board, rook.file()))
 }
 
 /// Two white sliders stacked on the same line.
@@ -388,18 +366,11 @@ pub fn has_badbishop(pos: &Chess) -> bool {
 }
 
 pub fn has_doubled(pos: &Chess) -> bool {
-    let pawns = pieces(pos.board(), Role::Pawn, Color::White);
-    File::ALL
-        .iter()
-        .any(|f| pawns.into_iter().filter(|p| p.file() == *f).count() >= 2)
+    !doubled_pawns(pos.board(), Color::White).is_empty()
 }
 
 pub fn has_isolated(pos: &Chess) -> bool {
-    let pawns = pieces(pos.board(), Role::Pawn, Color::White);
-    let files: Vec<i32> = pawns.into_iter().map(file_i).collect();
-    files
-        .iter()
-        .any(|f| !files.contains(&(f - 1)) && !files.contains(&(f + 1)))
+    !isolated_pawns(pos.board(), Color::White).is_empty()
 }
 
 pub fn has_space(pos: &Chess) -> bool {
