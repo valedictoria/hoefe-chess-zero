@@ -101,7 +101,13 @@ pub struct Line {
 pub struct Analysis {
     /// Best first. Only the top `multipv` moves appear; everything else the
     /// engine judged worse and did not report.
+    ///
+    /// May be shorter than requested, or empty, when a search budget cut the
+    /// final iteration short. Callers building a policy target should check.
     pub lines: Vec<Line>,
+    /// The engine's chosen move, taken from the `bestmove` line. Present even
+    /// when no usable `info` line was, so a game can always be continued.
+    pub best_move: Option<Move>,
     pub depth: u32,
     pub nodes: u64,
     pub elapsed: Duration,
@@ -251,7 +257,12 @@ impl Teacher {
         let multipv = self.multipv;
 
         let mut protocol_error = None;
+        let mut bestmove_token = None;
         self.read_until(Duration::from_secs(600), "bestmove", |line| {
+            if let Some(rest) = line.strip_prefix("bestmove ") {
+                bestmove_token = rest.split_whitespace().next().map(str::to_string);
+                return true;
+            }
             if line.starts_with("bestmove") {
                 return true;
             }
@@ -285,18 +296,44 @@ impl Teacher {
             return Err(e);
         }
 
-        let elapsed = started.elapsed();
-        let (depth, lines) = by_depth
-            .into_iter()
-            .filter(|(_, slot)| slot.first().map(Option::is_some).unwrap_or(false))
+        let best_move = bestmove_token
+            .as_deref()
+            .and_then(|t| t.parse::<UciMove>().ok())
+            .and_then(|u| u.to_move(pos).ok());
+
+        // Prefer the deepest iteration that actually *completed*.
+        //
+        // A node or time budget routinely stops a search mid-iteration, leaving
+        // the deepest depth holding only its first line or two while the
+        // iteration below it holds the full set. Taking the deepest depth
+        // regardless throws away most of the policy target and nothing fails --
+        // the records simply come out with one move instead of the requested
+        // several, and the network trained on them is quietly worse.
+        let expected = multipv.min(pos.legal_moves().len());
+        let pick = by_depth
+            .iter()
+            .filter(|(_, slot)| slot.iter().take(expected).all(Option::is_some))
             .max_by_key(|(d, _)| *d)
-            .ok_or_else(|| TeacherError::Protocol("no usable info lines".into()))?;
+            .or_else(|| {
+                by_depth
+                    .iter()
+                    .filter(|(_, slot)| slot.first().map(Option::is_some).unwrap_or(false))
+                    .max_by_key(|(d, _)| *d)
+            });
+
+        let (depth, lines) = match pick {
+            Some((d, slot)) => (*d, slot.iter().flatten().cloned().collect::<Vec<_>>()),
+            // No usable line at all. Not an error: the caller still has
+            // best_move and can decide whether to skip labelling this position.
+            None => (0, Vec::new()),
+        };
 
         Ok(Analysis {
-            lines: lines.into_iter().flatten().collect(),
+            lines,
+            best_move,
             depth,
             nodes,
-            elapsed,
+            elapsed: started.elapsed(),
         })
     }
 
