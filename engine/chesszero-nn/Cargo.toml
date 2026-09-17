@@ -1,0 +1,15 @@
+[package]
+name = "chesszero-nn"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "candle implementation of the prefix-LM transformer, loading trainer weights"
+
+[dependencies]
+candle-core.workspace = true
+candle-nn.workspace = true
+safetensors.workspace = true
+chesszero-core.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

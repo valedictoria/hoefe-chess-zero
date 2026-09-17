@@ -185,19 +185,100 @@ def write_golden(path: Path, n_random: int, seed: int) -> dict:
     return blob
 
 
+#: The language-model head shares its weight matrix with the token embedding.
+#: safetensors refuses to write two names over one buffer, so the head is left
+#: out of the file and the engine reuses the embedding, exactly as PyTorch does.
+TIED_TENSORS = ("lm_head.weight",)
+
+
+def state_dict_for_export(model) -> dict:
+    return {
+        k: v.contiguous()
+        for k, v in model.state_dict().items()
+        if k not in TIED_TENSORS
+    }
+
+
 def write_weights(checkpoint: Path, out: Path) -> None:
-    import torch
     from safetensors.torch import save_file
 
     from chesszero.model import ChessZeroNet
 
     model, _ = ChessZeroNet.load(checkpoint)
-    tensors = {k: v.contiguous() for k, v in model.state_dict().items()}
+    tensors = state_dict_for_export(model)
     metadata = {k: str(v) for k, v in model.cfg.to_dict().items()}
+    metadata["tied_lm_head"] = "true"
     out.parent.mkdir(parents=True, exist_ok=True)
     save_file(tensors, str(out), metadata=metadata)
     total = sum(t.numel() for t in tensors.values())
     print(f"wrote {out} ({len(tensors)} tensors, {total:,} parameters)")
+
+
+def write_reference(out_weights: Path, out_json: Path, seed: int = 11) -> None:
+    """A tiny network plus its exact outputs, so the engine can prove parity.
+
+    golden.json pins the *encoding*; this pins the *network*. Without it a port
+    that gets gelu or the attention mask subtly wrong still loads and still runs,
+    and the only symptom is an engine that plays badly.
+    """
+    import json
+
+    import torch
+    from safetensors.torch import save_file
+
+    from chesszero.model import ChessZeroNet, ModelConfig
+
+    torch.manual_seed(seed)
+    cfg = ModelConfig(d_model=32, n_layer=2, n_head=2, d_ff=64)
+    model = ChessZeroNet(cfg).eval()
+
+    generator = torch.Generator().manual_seed(seed)
+    # Amplify the initialisation on purpose. The training init has std 0.02, which
+    # keeps every activation so close to zero that exact and tanh-approximate GELU
+    # agree to ~1e-7 -- a parity test built on those weights passes even when the
+    # port uses the wrong activation. Driving pre-activations out to roughly +-3
+    # puts them where the variants actually diverge, so the fixture discriminates.
+    with torch.no_grad():
+        for name, param in model.named_parameters():
+            if param.dim() >= 2:
+                param.normal_(0.0, 0.5, generator=generator)
+            elif name.endswith(".weight"):
+                param.normal_(1.0, 0.1, generator=generator)  # LayerNorm gain
+            else:
+                param.normal_(0.0, 0.1, generator=generator)
+
+    ids = torch.randint(0, cfg.vocab_size, (3, cfg.seq_len), generator=generator)
+    with torch.no_grad():
+        full = model(ids)
+        cheap = model.position_only(ids)
+
+    def flat(tensor):
+        return [round(float(x), 6) for x in tensor.flatten().tolist()]
+
+    blob = {
+        "config": cfg.to_dict(),
+        "tied_lm_head": True,
+        "inputs": ids.tolist(),
+        "outputs": {
+            "policy": [flat(row) for row in full["policy"]],
+            "value": [flat(row) for row in full["value"]],
+            "mlh": flat(full["mlh"]),
+            "policy_reasoned": [flat(row) for row in full["policy_reasoned"]],
+            "value_reasoned": [flat(row) for row in full["value_reasoned"]],
+            # the language-model head at the readout positions that drive generation
+            "lm_at_sep": [flat(full["lm"][i, cfg.prefix_len - 1]) for i in range(ids.shape[0])],
+            "lm_at_last": [flat(full["lm"][i, -1]) for i in range(ids.shape[0])],
+            # the cheap path must agree with the full forward
+            "policy_position_only": [flat(row) for row in cheap["policy"]],
+        },
+    }
+
+    out_weights.parent.mkdir(parents=True, exist_ok=True)
+    metadata = {k: str(v) for k, v in cfg.to_dict().items()}
+    metadata["tied_lm_head"] = "true"
+    save_file(state_dict_for_export(model), str(out_weights), metadata=metadata)
+    out_json.write_text(json.dumps(blob, separators=(",", ":")))
+    print(f"wrote {out_weights} and {out_json} ({model.n_params():,} parameters)")
 
 
 def main() -> None:
@@ -213,13 +294,20 @@ def main() -> None:
     w.add_argument("--checkpoint", type=Path, required=True)
     w.add_argument("--out", type=Path, required=True)
 
+    spec_dir = Path(__file__).parent.parent / "spec"
+    r = sub.add_parser("reference", help="write the network parity fixture")
+    r.add_argument("--weights", type=Path, default=spec_dir / "nn_reference.safetensors")
+    r.add_argument("--json", type=Path, default=spec_dir / "nn_reference.json")
+
     args = parser.parse_args()
     if args.command == "golden":
         blob = write_golden(args.out, args.positions, args.seed)
         size = args.out.stat().st_size
         print(f"wrote {args.out} ({len(blob['cases'])} cases, {size / 1e6:.1f} MB)")
-    else:
+    elif args.command == "weights":
         write_weights(args.checkpoint, args.out)
+    else:
+        write_reference(args.weights, args.json)
 
 
 if __name__ == "__main__":
