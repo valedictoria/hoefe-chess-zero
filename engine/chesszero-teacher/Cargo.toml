@@ -1,0 +1,10 @@
+[package]
+name = "chesszero-teacher"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Drives an external UCI engine to label training positions"
+
+[dependencies]
+shakmaty.workspace = true
+chesszero-core.workspace = true
