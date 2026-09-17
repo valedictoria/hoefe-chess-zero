@@ -221,3 +221,99 @@ fn castling_uses_the_kings_destination_not_the_rook() {
         move_to_index(Square::E1, Square::G1, None)
     );
 }
+
+fn parse_trace_move(uci: &str) -> (Square, Square, Option<Role>) {
+    let from: Square = uci[0..2].parse().unwrap();
+    let to: Square = uci[2..4].parse().unwrap();
+    let promo = match uci.as_bytes().get(4) {
+        Some(b'q') => Some(Role::Queen),
+        Some(b'r') => Some(Role::Rook),
+        Some(b'b') => Some(Role::Bishop),
+        Some(b'n') => Some(Role::Knight),
+        _ => None,
+    };
+    (from, to, promo)
+}
+
+#[test]
+fn every_position_detects_the_same_motifs() {
+    let g = golden();
+    for case in g["cases"].as_array().unwrap() {
+        let fen = case["fen"].as_str().unwrap();
+        let (canon, _) = canonical(&parse(fen));
+        let want: Vec<&str> = case["motifs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(
+            chesszero_core::motifs::detect_motifs(&canon),
+            want,
+            "motifs differ for {fen}"
+        );
+    }
+}
+
+#[test]
+fn every_trace_matches_the_trainer() {
+    let g = golden();
+    for case in g["cases"].as_array().unwrap() {
+        let fen = case["fen"].as_str().unwrap();
+        let (canon, _) = canonical(&parse(fen));
+
+        let input = &case["trace_input"];
+        let best = input["best"].as_str().map(parse_trace_move);
+        let candidates: Vec<(Square, Square, Option<Role>)> = input["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| parse_trace_move(v.as_str().unwrap()))
+            .collect();
+        let q = input["q"].as_f64().unwrap();
+
+        let want: Vec<u16> = case["trace"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_u64().unwrap() as u16)
+            .collect();
+        let ours = chesszero_core::trace::annotate(&canon, best, &candidates, q);
+
+        if ours != want {
+            let names = |t: &[u16]| {
+                t.iter()
+                    .map(|id| chesszero_core::vocab::token(*id))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            };
+            panic!("trace differs for {fen}\n  ours: {}\n  want: {}", names(&ours), names(&want));
+        }
+    }
+}
+
+#[test]
+fn generated_traces_obey_the_grammar() {
+    let g = golden();
+    let slots = vocab::trace_slots();
+    for case in g["cases"].as_array().unwrap() {
+        let (canon, _) = canonical(&parse(case["fen"].as_str().unwrap()));
+        let input = &case["trace_input"];
+        let best = input["best"].as_str().map(parse_trace_move);
+        let candidates: Vec<(Square, Square, Option<Role>)> = input["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| parse_trace_move(v.as_str().unwrap()))
+            .collect();
+        let trace = chesszero_core::trace::annotate(
+            &canon,
+            best,
+            &candidates,
+            input["q"].as_f64().unwrap(),
+        );
+        for (slot, token_id) in trace.iter().enumerate() {
+            assert!(slots[slot].contains(token_id), "slot {slot} token is ungrammatical");
+        }
+    }
+}

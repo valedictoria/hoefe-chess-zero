@@ -166,9 +166,11 @@ def hanging_pieces(board: chess.Board, color: chess.Color) -> list[int]:
         if not defenders:
             out.append(square)
             continue
-        cheapest = min(
-            PIECE_VALUE[board.piece_type_at(a)] for a in attackers
-        )
+        # TACTICAL_VALUE, not PIECE_VALUE: the king is priced at 0 for material
+        # counting, which would make it look like the cheapest attacker going.
+        # A defended piece attacked only by the enemy king is not hanging --
+        # the king is not allowed to take it.
+        cheapest = min(TACTICAL_VALUE[board.piece_type_at(a)] for a in attackers)
         if cheapest + 0.5 < PIECE_VALUE[piece.piece_type]:
             out.append(square)
     return out

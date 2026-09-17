@@ -11,7 +11,9 @@
 //! this crate reproduces it byte for byte.
 
 pub mod encoding;
+pub mod features;
 pub mod motifs;
+pub mod trace;
 pub mod vocab;
 
 pub use encoding::{
