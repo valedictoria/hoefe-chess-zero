@@ -1,0 +1,14 @@
+# local virtualenv (torch is installed here; see README notes)
+.venv/
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# training artifacts
+*.pt
+*.npz
+data/
+runs/
