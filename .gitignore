@@ -12,3 +12,6 @@ __pycache__/
 *.npz
 data/
 runs/
+
+# rust
+engine/target/

@@ -144,7 +144,7 @@ def build_case(board: chess.Board, repetitions: int) -> dict:
         "flipped": flipped,
         "repetitions": repetitions,
         "prefix": prefix,
-        # canonical uci -> policy index, sorted so the file is stable
+        # real-board uci -> policy index of its canonical form, sorted for stability
         "moves": sorted(
             ([canonical_move(m, flipped).uci(), i] for m, i in zip(moves, indices)),
             key=lambda pair: pair[1],

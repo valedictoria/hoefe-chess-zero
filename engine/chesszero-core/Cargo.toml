@@ -1,0 +1,12 @@
+[package]
+name = "chesszero-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Board encoding, move indexing and motif detection, mirroring the Python trainer exactly"
+
+[dependencies]
+shakmaty.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
